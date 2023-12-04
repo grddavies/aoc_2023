@@ -44,7 +44,7 @@ parseCount str = do
   return Count {count = count, colour = colour}
 
 data Colour = Red | Green | Blue
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 parseColour :: Text -> Maybe Colour
 parseColour str = case str of
