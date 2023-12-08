@@ -15,7 +15,6 @@ import MultiRangeMap qualified as M
 import System.Posix (seekDirStream)
 
 -- Parsers
-
 parseSeeds :: Parser [Int]
 parseSeeds = do
   string "seeds: "
@@ -44,7 +43,22 @@ parseAlmanac = do
   maps <- ((parseMap <?> "Map Parser") `sepBy` skipSpace) <?> "Maps Parser"
   return (seeds, maps)
 
--- Read lines dest src length
+type MyMap = (String, [(Int, Int, Int)], Int -> Int)
+parseMyMap :: Parser MyMap
+parseMyMap = do
+  name <- many (letter <|> char '-')
+  string " map:\n"
+  lines <- parseMapLine `sepBy` char '\n'
+  return $ foldl' (\(name, spec, f) line -> (name, line:spec, f . readMapLine line)) (name, [], id) lines
+
+parseMyAlmanac :: Parser ([Int], [MyMap])
+parseMyAlmanac = do
+  seeds <- parseSeeds <?> "Seeds Parser"
+  skipSpace
+  mms <- ((parseMyMap <?> "Map Parser") `sepBy` skipSpace) <?> "Maps Parser"
+  return (seeds, mms)
+
+-- Helpers
 readMapLine :: (Int, Int, Int) -> (Int -> Int)
 readMapLine (d, s, l) x = if s <= x && x < s + l then d + x - s else x
 
@@ -57,19 +71,37 @@ verboseApply x f = do
 verboseMap :: Int -> [Int -> Int] -> IO Int
 verboseMap = foldM verboseApply
 
+padR :: Int -> String -> String
+padR n s
+    | length s < n  = s ++ replicate (n - length s) ' '
+    | otherwise     = s
+
+verboseMyApply :: Int -> MyMap -> IO Int
+verboseMyApply x (name, spec, f) = do
+  let y = f x
+  putStrLn $ padR 26 name ++ ": " ++ show spec
+  putStrLn $ show x ++ " -> " ++ show y
+  return y
+
+verboseMyMap :: Int -> [MyMap] -> IO Int
+verboseMyMap = foldM verboseMyApply
+
 main :: IO ()
 main = do
   inputText <- TIO.getContents
-  (seeds, maps) <- case parseOnly parseAlmanac inputText of
+  (seeds, maps) <- case parseOnly parseMyAlmanac inputText of
     Left err -> error err
     Right success -> return success
-  let m = foldl' (.) id maps
+  let m = foldl' (.) id (map (\(a,b,c) -> c) maps)
   print $ "Seeds:     " ++ show seeds
   print $ "Locations: " ++ show (map m seeds)
   forM_ seeds $ \s -> do
     putStrLn $ "Seed: " ++ show s
-    verboseMap s maps
+    verboseMyMap s maps
     putStrLn ""
+
+  forM_ maps $ \(name, spec, f) -> do
+    verboseMyApply 74 (name, spec, f)
 
 
 
