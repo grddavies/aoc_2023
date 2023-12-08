@@ -3,7 +3,7 @@
 import Data.Attoparsec.Text (Parser, char, decimal, letter, parseOnly, string, skip, skipSpace, sepBy, (<?>))
 
 import Control.Applicative ((<|>), many)
-import Control.Monad (foldM_, foldM, forM_)
+import Control.Monad (foldM_, foldM, forM_, liftM2)
 import Data.Char (isDigit, isSpace)
 import Data.List (foldl')
 import Data.Text (Text)
@@ -13,8 +13,28 @@ import Data.Text.Read qualified as TR
 import MultiRangeMap (MultiRangeMap)
 import MultiRangeMap qualified as M
 import System.Posix (seekDirStream)
+import Data.Maybe (fromJust)
 
--- Parsers
+
+-- Map Data Structure
+type RangeMap = Int -> Maybe Int
+rangeMap :: (Int, Int, Int) -> RangeMap
+rangeMap (d, s, l) x = if s <= x && x < s + l then Just (d + x - s) else Nothing
+
+idRangeMap :: RangeMap
+idRangeMap = Just
+
+composeRangeMap :: RangeMap -> RangeMap -> RangeMap
+composeRangeMap = liftM2 (<|>)
+
+type Map = Int -> Int
+runRangeMap :: RangeMap -> Map
+runRangeMap f x = fromJust $ f x
+
+type DebugMap = (String, [(Int, Int, Int)], Map)
+
+
+-- Text Parsers for Input
 parseSeeds :: Parser [Int]
 parseSeeds = do
   string "seeds: "
@@ -29,103 +49,73 @@ parseMapLine = do
   l <- decimal
   return (d, s, l)
 
-parseMap :: Parser (Int -> Int)
+-- Map Parsers
+parseMap :: Parser Map
 parseMap = do
   many (letter <|> char '-')
   string " map:\n"
   lines <- parseMapLine `sepBy` char '\n'
-  return $ foldl' (.) id $ map readMapLine lines
+  let rm = foldl' (flip composeRangeMap) idRangeMap $ map rangeMap lines
+  return $ runRangeMap rm
 
-parseAlmanac :: Parser ([Int], [Int -> Int])
+parseAlmanac :: Parser ([Int], [Map])
 parseAlmanac = do
   seeds <- parseSeeds <?> "Seeds Parser"
   skipSpace
   maps <- ((parseMap <?> "Map Parser") `sepBy` skipSpace) <?> "Maps Parser"
   return (seeds, maps)
 
-type MyMap = (String, [(Int, Int, Int)], Int -> Int)
-parseMyMap :: Parser MyMap
-parseMyMap = do
+parseDebugMap :: Parser DebugMap
+parseDebugMap = do
   name <- many (letter <|> char '-')
   string " map:\n"
   lines <- parseMapLine `sepBy` char '\n'
-  return $ foldl' (\(name, spec, f) line -> (name, line:spec, f . readMapLine line)) (name, [], id) lines
+  let composeDebug (spec, f) line = (line:spec, composeRangeMap (rangeMap line) f)
+  let (specs, f) = foldl' composeDebug ([], idRangeMap) lines
+  return (name, specs, runRangeMap f) 
 
-parseMyAlmanac :: Parser ([Int], [MyMap])
-parseMyAlmanac = do
+parseDebugAlmanac :: Parser ([Int], [DebugMap])
+parseDebugAlmanac = do
   seeds <- parseSeeds <?> "Seeds Parser"
   skipSpace
-  mms <- ((parseMyMap <?> "Map Parser") `sepBy` skipSpace) <?> "Maps Parser"
+  mms <- ((parseDebugMap <?> "Map Parser") `sepBy` skipSpace) <?> "Maps Parser"
   return (seeds, mms)
 
--- Helpers
-readMapLine :: (Int, Int, Int) -> (Int -> Int)
-readMapLine (d, s, l) x = if s <= x && x < s + l then d + x - s else x
-
-verboseApply :: Int -> (Int -> Int) -> IO Int
-verboseApply x f = do
-  let y = f x
-  putStrLn $ show x ++ " -> " ++ show y
-  return y
-
-verboseMap :: Int -> [Int -> Int] -> IO Int
-verboseMap = foldM verboseApply
-
+-- Degugging
 padR :: Int -> String -> String
 padR n s
     | length s < n  = s ++ replicate (n - length s) ' '
     | otherwise     = s
 
-verboseMyApply :: Int -> MyMap -> IO Int
-verboseMyApply x (name, spec, f) = do
+verboseDebugApply1 :: Int -> DebugMap -> IO Int
+verboseDebugApply1 x (name, spec, f) = do
   let y = f x
   putStrLn $ padR 26 name ++ ": " ++ show spec
   putStrLn $ show x ++ " -> " ++ show y
   return y
 
-verboseMyMap :: Int -> [MyMap] -> IO Int
-verboseMyMap = foldM verboseMyApply
-
 main :: IO ()
 main = do
   inputText <- TIO.getContents
-  (seeds, maps) <- case parseOnly parseMyAlmanac inputText of
+  (seeds, maps) <- case parseOnly parseAlmanac inputText of
     Left err -> error err
     Right success -> return success
-  let m = foldl' (.) id (map (\(a,b,c) -> c) maps)
-  print $ "Seeds:     " ++ show seeds
-  print $ "Locations: " ++ show (map m seeds)
-  forM_ seeds $ \s -> do
-    putStrLn $ "Seed: " ++ show s
-    verboseMyMap s maps
-    putStrLn ""
 
-  forM_ maps $ \(name, spec, f) -> do
-    verboseMyApply 74 (name, spec, f)
+  let m = foldl' (flip (.)) id maps
+  print $ minimum $ map m seeds
 
+debugmain :: IO ()
+debugmain = do
+  inputText <- TIO.readFile "input"
+  (seeds, dmaps) <- case parseOnly parseDebugAlmanac inputText of
+    Left err -> error err
+    Right success -> return success
 
+  let maps = map (\(_, _, f) -> f) dmaps
+  let m = foldl' (flip (.)) id maps
+  putStrLn $ "Minimum Location1: " ++ show (minimum $ map m seeds)
+  putStrLn ""
 
-
-
-
--- main :: IO ()
--- main = do
---   lines <- TIO.getContents
---   let (_ : seedsT : seedToSoilT : soilToFertT : fertToWatT : watToLightT : lightToTempT : tempToHumidT : humidToLocT : _) = T.splitOn ":" lines
-
---       seeds = map readInt $ takeWhile startsWithDigit $ T.words seedsT
-
---       parseInputGroup :: Text -> [[Int]]
---       parseInputGroup str = fmap (map readInt . T.words) (takeWhile startsWithDigit $ T.lines $ T.tail str)
-
---       seedToSoil = buildRangeMap $ parseInputGroup seedToSoilT
---       soilToFert = buildRangeMap $ parseInputGroup soilToFertT
---       fertToWat = buildRangeMap $ parseInputGroup fertToWatT
---       watToLight = buildRangeMap $ parseInputGroup watToLightT
---       lightToTemp = buildRangeMap $ parseInputGroup lightToTempT
---       tempToHumid = buildRangeMap $ parseInputGroup tempToHumidT
---       humidToLoc = buildRangeMap $ parseInputGroup humidToLocT
-
---       lookupSeed s = foldl' M.lookup s [seedToSoil, soilToFert, fertToWat, watToLight, lightToTemp, tempToHumid, humidToLoc]
-
---   print $ minimum $ map lookupSeed seeds
+  forM_ seeds $ \seed -> do
+    putStrLn $ "Seed: " ++ show seed
+    foldM_ verboseDebugApply1 seed dmaps
