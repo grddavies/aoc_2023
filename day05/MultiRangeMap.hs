@@ -3,10 +3,6 @@ module MultiRangeMap where
 import Data.Foldable (find)
 import Data.List (foldl')
 
-m = MultiRangeMap [((0, 49), (0, 49)), ((50, 97), (52, 99))]
-
-empty = mempty :: MultiRangeMap
-
 data MultiRangeMap where
   MultiRangeMap :: {ranges :: [RangeMap]} -> MultiRangeMap
   deriving (Show)
@@ -16,6 +12,8 @@ instance Semigroup MultiRangeMap where
 
 instance Monoid MultiRangeMap where
   mempty = MultiRangeMap []
+
+empty = mempty :: MultiRangeMap
 
 type Range = (Int, Int)
 
@@ -34,7 +32,6 @@ insert x [] = [x]
 insert x (y : ys) =
   if x <= y then x : y : ys else y : insert x ys
 
-addRange m d s n =
-  -- WARN: Assumes no colliding ranges
+addRange m (d, s, n) =
   let r = ((s, s + n - 1), (d, d + n - 1))
    in MultiRangeMap {ranges = insert r (ranges m)}
