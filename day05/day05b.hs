@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+import Data.Attoparsec.Text (parseOnly)
 import Data.Char (isDigit)
 import Data.List (foldl')
 import Data.Text (Text)
@@ -8,6 +9,7 @@ import Data.Text.IO qualified as TIO
 import Data.Text.Read qualified as TR
 import MultiRangeMap (MultiRangeMap)
 import MultiRangeMap qualified as M
+import ParseInput (parseFile)
 
 splitPairs :: [a] -> [(a, a)]
 splitPairs [] = []
@@ -17,41 +19,14 @@ splitPairs xs = t : splitPairs bs
     t = (f, s)
     ([f, s], bs) = splitAt 2 xs
 
-startsWithDigit :: Text -> Bool
-startsWithDigit = maybe False (isDigit . fst) . T.uncons
-
-readInt :: Text -> Int
-readInt str = case TR.decimal str of
-  Left _ -> error $ T.unpack $ "Failed to parse '" <> str <> "'"
-  Right (x, _) -> x
-
-applyLine :: MultiRangeMap -> [Int] -> MultiRangeMap
-applyLine m xs = case xs of
-  [drs, srs, n] -> M.addRange m drs srs n
-  _ -> error "bad input"
-
-buildRangeMap :: [[Int]] -> MultiRangeMap
-buildRangeMap = foldl' applyLine M.empty
-
 main :: IO ()
 main = do
-  lines <- TIO.getContents
-  let (_ : seedsT : seedToSoilT : soilToFertT : fertToWatT : watToLightT : lightToTempT : tempToHumidT : humidToLocT : _) = T.splitOn ":" lines
+  inputText <- TIO.getContents
+  (seeds, maps) <- case parseOnly parseFile inputText of
+    Left err -> error err
+    Right success -> return success
 
-      seedRanges = splitPairs $ map readInt $ takeWhile startsWithDigit $ T.words seedsT
-
-      parseInputGroup :: Text -> [[Int]]
-      parseInputGroup str = fmap (map readInt . T.words) (takeWhile startsWithDigit $ T.lines $ T.tail str)
-
-      seedToSoil = buildRangeMap $ parseInputGroup seedToSoilT
-      soilToFert = buildRangeMap $ parseInputGroup soilToFertT
-      fertToWat = buildRangeMap $ parseInputGroup fertToWatT
-      watToLight = buildRangeMap $ parseInputGroup watToLightT
-      lightToTemp = buildRangeMap $ parseInputGroup lightToTempT
-      tempToHumid = buildRangeMap $ parseInputGroup tempToHumidT
-      humidToLoc = buildRangeMap $ parseInputGroup humidToLocT
-
-      lookupSeed s = foldl' M.lookup s [seedToSoil, soilToFert, fertToWat, watToLight, lightToTemp, tempToHumid, humidToLoc]
+  let lookupSeed s = foldl' M.lookup s maps
+      seedRanges = splitPairs seeds
       lookupSeedRange (s, n) = [lookupSeed x | x <- [s .. s + n - 1]]
-
-  print $ minimum $ concatMap lookupSeedRange seedRanges
+   in print $ minimum $ concatMap lookupSeedRange seedRanges
